@@ -48,29 +48,47 @@ function haversine(lat1, lng1, lat2, lng2) {
   return 2 * R * Math.asin(Math.sqrt(a));
 }
 
-/** Simple TTL cache with in-flight de-duplication. */
+/**
+ * TTL cache with in-flight de-duplication and optional stale-while-revalidate:
+ * with `stale` > 0, an expired value younger than ttl + stale is returned at
+ * once while a single background refresh replaces it (failures keep the old one).
+ */
 class TTLCache {
   constructor(max = 2000) {
     this.max = max;
     this.map = new Map();
   }
-  async get(key, ttlMs, loader) {
+  async get(key, ttlMs, loader, { stale = 0 } = {}) {
     const now = Date.now();
     const hit = this.map.get(key);
-    if (hit && hit.exp > now) {
-      return hit.promise;
+    if (hit && hit.exp > now) return hit.promise;
+    if (hit && hit.done && stale > 0 && hit.exp + stale > now) {
+      if (!hit.refreshing) {
+        hit.refreshing = true;
+        Promise.resolve()
+          .then(loader)
+          .then((value) => this.map.set(key, { exp: Date.now() + ttlMs, promise: Promise.resolve(value), done: true, value }))
+          .catch(() => {
+            hit.refreshing = false;
+          });
+      }
+      return hit.value;
     }
-    const promise = Promise.resolve().then(loader);
-    this.map.set(key, { exp: now + ttlMs, promise });
-    promise.catch(() => {
-      // Do not cache failures.
-      if (this.map.get(key)?.promise === promise) this.map.delete(key);
-    });
-    if (this.map.size > this.max) {
-      const first = this.map.keys().next().value;
-      this.map.delete(first);
-    }
-    return promise;
+    const entry = { exp: now + ttlMs, done: false };
+    entry.promise = Promise.resolve().then(loader);
+    entry.promise.then(
+      (value) => {
+        entry.done = true;
+        entry.value = value;
+      },
+      () => {
+        // Do not cache failures.
+        if (this.map.get(key) === entry) this.map.delete(key);
+      }
+    );
+    this.map.set(key, entry);
+    if (this.map.size > this.max) this.map.delete(this.map.keys().next().value);
+    return entry.promise;
   }
 }
 

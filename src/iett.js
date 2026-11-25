@@ -11,43 +11,96 @@ const cache = new TTLCache(5000);
 const SEC = 1000;
 const MIN = 60 * SEC;
 const HOUR = 60 * MIN;
+const DAY = 24 * HOUR;
 
-async function request(url, { method = 'GET', body, headers = {}, timeout = 20000, type = 'text', retries = 3 } = {}) {
+// ---------- transport ----------
+// Keep-alive HTTPS: once a connection to İETT is up we reuse it, so flaky networks
+// (e.g. a dorm firewall that refuses many *new* connections) hurt far less.
+const https = require('https');
+const zlib = require('zlib');
+const agent = new https.Agent({ keepAlive: true, keepAliveMsecs: 15000, maxSockets: 8, maxFreeSockets: 8, scheduling: 'lifo' });
+// In environments that need an HTTP proxy we fall back to fetch (NODE_USE_ENV_PROXY).
+const USE_FETCH = !!(process.env.HTTPS_PROXY || process.env.https_proxy);
+const NET_CODES = new Set(['ECONNREFUSED', 'EHOSTUNREACH', 'ENETUNREACH', 'ECONNRESET', 'EPIPE', 'EAI_AGAIN', 'ENOTFOUND', 'ETIMEDOUT', 'UND_ERR_SOCKET', 'UND_ERR_CONNECT_TIMEOUT']);
+
+function nodeRequest(url, { method, body, headers, timeout }) {
+  return new Promise((resolve, reject) => {
+    const req = https.request(new URL(url), {
+      method,
+      agent,
+      headers: { ...headers, 'Accept-Encoding': 'gzip, deflate, br', ...(body ? { 'Content-Length': Buffer.byteLength(body) } : {}) },
+    }, (res) => {
+      const enc = String(res.headers['content-encoding'] || '');
+      let stream = res;
+      if (enc.includes('gzip')) stream = res.pipe(zlib.createGunzip());
+      else if (enc.includes('deflate')) stream = res.pipe(zlib.createInflate());
+      else if (enc.includes('br')) stream = res.pipe(zlib.createBrotliDecompress());
+      const chunks = [];
+      stream.on('data', (c) => chunks.push(c));
+      stream.on('end', () => resolve({ status: res.statusCode, text: Buffer.concat(chunks).toString('utf8') }));
+      stream.on('error', reject);
+    });
+    req.setTimeout(timeout, () => req.destroy(Object.assign(new Error('timeout'), { name: 'AbortError' })));
+    req.on('error', reject);
+    if (body) req.write(body);
+    req.end();
+  });
+}
+
+async function fetchRequest(url, { method, body, headers, timeout }) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeout);
+  try {
+    const res = await fetch(url, { method, body, headers, signal: ctrl.signal, redirect: 'manual' });
+    return { status: res.status, text: await res.text() };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+const isNetErr = (e) => e && (NET_CODES.has(e.code) || NET_CODES.has(e.cause?.code) || e.message === 'fetch failed');
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+async function request(url, { method = 'GET', body, headers = {}, timeout = 15000, type = 'text', retries = 2 } = {}) {
+  const hdrs = { 'User-Agent': UA, Accept: '*/*', 'Accept-Language': 'tr-TR,tr;q=0.9', ...headers };
   let lastErr;
-  for (let attempt = 0; attempt <= retries; attempt++) {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), timeout);
+  let netTries = 0;
+  for (let attempt = 0; attempt <= retries; ) {
     try {
-      const res = await fetch(url, {
-        method,
-        body,
-        headers: { 'User-Agent': UA, Accept: '*/*', 'Accept-Language': 'tr-TR,tr;q=0.9', ...headers },
-        signal: ctrl.signal,
-        redirect: 'manual',
-      });
+      const res = await (USE_FETCH ? fetchRequest : nodeRequest)(url, { method, body, headers: hdrs, timeout });
       if (res.status >= 300 && res.status < 400) throw Object.assign(new Error(`Bulunamadı (${res.status})`), { status: 404 });
-      if (!res.ok) throw Object.assign(new Error(`Kaynak hata verdi: HTTP ${res.status}`), { status: res.status >= 500 ? 502 : res.status });
-      const t = await res.text();
+      if (res.status >= 400) throw Object.assign(new Error(`Kaynak hata verdi: HTTP ${res.status}`), { status: res.status >= 500 ? 502 : res.status });
       if (type === 'json') {
-        if (!t.trim()) throw Object.assign(new Error('Boş yanıt'), { status: 502 });
-        return JSON.parse(t);
+        if (!res.text.trim()) throw Object.assign(new Error('Boş yanıt'), { status: 502 });
+        return JSON.parse(res.text);
       }
-      return t;
+      return res.text;
     } catch (e) {
       lastErr = e;
       if (e.status === 404 || e.status === 400) break;
-      // Flaky home networks: quick connect failures are retried after a short pause.
-      if (attempt < retries) await new Promise((r) => setTimeout(r, 300 * (attempt + 1)));
-    } finally {
-      clearTimeout(timer);
+      if (isNetErr(e) && netTries < 10) {
+        // Refused/unreachable connects fail in ~30 ms: retry almost immediately.
+        netTries++;
+        await sleep(40 + netTries * 30);
+        continue;
+      }
+      attempt++;
+      if (attempt <= retries) await sleep(350 * attempt);
     }
   }
   if (lastErr.name === 'AbortError') throw Object.assign(new Error('İETT servisi zamanında cevap vermedi, tekrar deneyin'), { status: 504 });
-  if (lastErr instanceof TypeError) {
-    // Network-level failure (DNS, refused, no route): never show raw "fetch failed" to the user.
+  if (isNetErr(lastErr) || lastErr instanceof TypeError) {
     throw Object.assign(new Error('Sunucu İETT servisine bağlanamadı. İnternet bağlantısını kontrol edip tekrar deneyin.'), { status: 502 });
   }
   throw lastErr;
+}
+
+// Keep one connection to each upstream warm so user requests rarely need a fresh connect.
+if (!USE_FETCH && process.env.NODE_ENV !== 'test') {
+  setInterval(() => {
+    request(`${IETT}/tr/RouteStation/GetLineStatus?rcode=500T`, { retries: 0, timeout: 8000 }).catch(() => {});
+    request(`${PLANNER}/search?query=taksim`, { retries: 0, timeout: 8000 }).catch(() => {});
+  }, 45000).unref();
 }
 
 const qs = (o) => new URLSearchParams(o).toString();
@@ -65,7 +118,7 @@ async function rawSearch(key) {
   return cache.get(`search:${key}`, 30 * MIN, async () => {
     const json = await iettGet('/tr/RouteStation/GetSearchItems', { key, langid: 1 }, { type: 'json' });
     return P.parseSearchItems(json);
-  });
+  }, { stale: 2 * DAY });
 }
 
 function score(itemNorm, codeNorm, qn) {
@@ -85,7 +138,10 @@ async function search(q, { limit = 25 } = {}) {
     const n = norm(s);
     return words.every((w) => n.includes(w));
   };
-  const [iett, places] = await Promise.allSettled([rawSearch(key), placeSearch(q)]);
+  // Place search (nasilgiderim) is often the slowest part: give it 2.5 s, it keeps
+  // running and is cached for the next keystroke.
+  const placesSoon = Promise.race([placeSearch(q), sleep(2500).then(() => [])]);
+  const [iett, places] = await Promise.allSettled([rawSearch(key), placesSoon]);
   const res = iett.status === 'fulfilled' ? iett.value : { lines: [], stops: [] };
   const lines = res.lines
     .filter((l) => matchesAll(`${l.code} ${l.name}`))
@@ -146,7 +202,7 @@ async function allLines({ fresh = false } = {}) {
 async function placeSearch(q) {
   if (String(q).trim().length < 3) return [];
   return cache.get(`place:${norm(q)}`, 6 * HOUR, async () => {
-    const json = await request(`${PLANNER}/search?${qs({ query: q })}`, { type: 'json', timeout: 8000, retries: 2 });
+    const json = await request(`${PLANNER}/search?${qs({ query: q })}`, { type: 'json', timeout: 8000, retries: 1 });
     const out = [];
     for (const s of json.stops || []) {
       out.push({ id: s.stopId, name: s.stopName, district: s.district || '', lat: s.point[0], lng: s.point[1], type: s.routeType || 'stop' });
@@ -170,7 +226,7 @@ async function stop(code) {
     const info = P.parseStationPage(page);
     if (!info.code) throw Object.assign(new Error('Durak bulunamadı'), { status: 404 });
     return { ...info, lines: P.parseStationLines(linesJson) };
-  });
+  }, { stale: 7 * DAY });
 }
 
 async function arrivals(code) {
@@ -242,7 +298,7 @@ async function line(code) {
       vars.push({ id: v.GUZERGAH_GUZERGAH_KODU, name: String(v.GUZERGAH_ADI || '').replace(/\s+/g, ' ').trim() });
     }
     return { code, name: info.name || `${directions[0].from} - ${directions[0].to}`, directions, alerts, variants: vars, updated: Date.now() };
-  });
+  }, { stale: 3 * DAY });
 }
 
 async function lineAlerts(code) {
@@ -263,7 +319,7 @@ async function schedule(code) {
     });
     const tables = P.parseSchedule(html);
     return { code, directions: tables };
-  });
+  }, { stale: 3 * DAY });
 }
 
 // ---------- live vehicles (İBB SOAP, works from Turkish IPs) ----------
@@ -389,7 +445,7 @@ async function announcements(page = 0) {
       headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8', 'X-Requested-With': 'XMLHttpRequest' },
     });
     return P.parseAnnouncements(html);
-  });
+  }, { stale: 1 * DAY });
 }
 
 function mergeAnn(a, b) {
