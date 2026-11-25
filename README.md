@@ -13,7 +13,7 @@ Otobüsünün nerede olduğunu ve bir yere nasıl gideceğini gösteren, reklams
 | **Ne zaman çıkayım?** | Rota sonuçlarında: önümüzdeki 2 saatteki 13 çıkış saatini dener, en kısa yolculuğu ve en erken varışı gösterir; grafikten saat seçebilirsin. |
 | **Favori hat değişiklik bildirimi** | Favori hatlarında güzergah değişikliği, yol çalışması ya da o hattı anan yeni bir İETT duyurusu çıkınca bildirim. |
 | **İlk / son sefer** | Sefer saatlerinde ilk ve son sefer, son sefere kalan süre. |
-| **İki tema** | LP-50 (açık: kâğıt, piksel etiketler, LCD durak panosu) ve Circuit (koyu: yarış siyahı, kırmızı, condensed italik). |
+| **Tasarım** | Tek tasarım dili, Gündüz (açık) ve Gece (koyu): kâğıt-mürekkep tonları, turuncu hat rengi, condensed tabela yazısı, dokunsal tuşlar ve gerçek durak panoları gibi amber LED varış panosu. Logo: iki hattın birleştiği kavşak (Y) ve aktarma durağı. |
 | **İneceğim durakta uyar** | Hat ekranında bir durağın 🚩 düğmesi ya da rota detayında "İneceğim yerde uyar": GPS ile durağa ~400 m kala uyarır (ekran açık kalır). |
 | **Hat ekranı** | Güzergah haritada, iki yön, tüm duraklar (sana en yakın durak işaretli), **sefer saatleri** (iş günü/Cumartesi/Pazar, sıradaki sefer vurgulu), hatla ilgili **anlık uyarılar** (güzergah değişikliği, yol çalışması). |
 | **Nasıl Giderim** | Otobüs, metro, metrobüs, Marmaray, tramvay, vapur, dolmuş dahil rota planlama. Seçenekler: en hızlı / az aktarma / az yürüme / raylı öncelikli; şimdi, kalkış ya da varış saatine göre. Süre, yürüme mesafesi, ücret, aktarma sayısı; adım adım tarif ve harita. |

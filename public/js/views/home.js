@@ -19,7 +19,7 @@ export async function viewNearby(token) {
   let usingMapCenter = false;
 
   render(`
-    <div class="view-head"><div style="flex:1"><div class="kicker"><span class="wordmark"><b>YK</b><i>MAPS</i></span></div><h2>Yakınımdaki duraklar</h2><div class="sub" id="nearSub">Konum bekleniyor…</div></div>
+    <div class="view-head"><div style="flex:1"><div class="kicker"><span class="wordmark"><svg class="mark" aria-hidden="true"><use href="#logo"/></svg><span>YK<i>MAPS</i></span></span></div><h2>Yakınımdaki duraklar</h2><div class="sub" id="nearSub">Konum bekleniyor…</div></div>
       <button class="btn small ghost" id="mapCenterBtn">${icon('pin')} Harita merkezi</button></div>
     <div class="quick-places" id="qp">
       ${['Ev', 'İş'].map((lbl) => {
@@ -467,7 +467,7 @@ export async function viewSettings(token) {
   const s = store.get().settings;
   render(`
     <div class="view-head"><h2>Ayarlar</h2></div>
-    <div class="kv"><span class="k">Tema<small>LP-50 (açık) · Circuit (koyu)</small></span><select id="theme" class="input"><option value="auto">Otomatik</option><option value="light">LP-50</option><option value="dark">Circuit</option></select></div>
+    <div class="kv"><span class="k">Tema<small>Otomatik: telefonun açık/koyu ayarını izler</small></span><select id="theme" class="input"><option value="auto">Otomatik</option><option value="light">Gündüz</option><option value="dark">Gece</option></select></div>
     <div class="kv"><span class="k">Canlı yenileme</span><select id="refresh" class="input" style="width:auto;padding:6px 10px">${[15, 20, 30, 60].map((n) => `<option value="${n}">${n} sn</option>`).join('')}</select></div>
     <div class="section-title">Bildirimler</div>
     <div class="kv"><span class="k">Arka plan bildirimleri<small id="pushState">Uygulama kapalıyken de otobüs alarmı gelir</small></span><button class="btn small ghost" id="notif">Aç</button></div>

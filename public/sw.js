@@ -1,5 +1,5 @@
 // Service worker: offline app shell + cached map tiles + notification clicks.
-const VERSION = 'ykmaps-v4';
+const VERSION = 'ykmaps-v5';
 const SHELL = [
   '/',
   '/index.html',
@@ -16,8 +16,7 @@ const SHELL = [
   '/css/fonts.css',
   '/fonts/barlow-latin-400-normal.woff2',
   '/fonts/barlow-latin-600-normal.woff2',
-  '/fonts/barlow-condensed-latin-800-italic.woff2',
-  '/fonts/silkscreen-latin-700-normal.woff2',
+  '/fonts/barlow-condensed-latin-700-normal.woff2',
   '/fonts/vt323-latin-400-normal.woff2',
   '/js/views/home.js',
   '/js/views/line.js',
