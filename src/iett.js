@@ -12,7 +12,7 @@ const SEC = 1000;
 const MIN = 60 * SEC;
 const HOUR = 60 * MIN;
 
-async function request(url, { method = 'GET', body, headers = {}, timeout = 20000, type = 'text', retries = 1 } = {}) {
+async function request(url, { method = 'GET', body, headers = {}, timeout = 20000, type = 'text', retries = 3 } = {}) {
   let lastErr;
   for (let attempt = 0; attempt <= retries; attempt++) {
     const ctrl = new AbortController();
@@ -36,6 +36,8 @@ async function request(url, { method = 'GET', body, headers = {}, timeout = 2000
     } catch (e) {
       lastErr = e;
       if (e.status === 404 || e.status === 400) break;
+      // Flaky home networks: quick connect failures are retried after a short pause.
+      if (attempt < retries) await new Promise((r) => setTimeout(r, 300 * (attempt + 1)));
     } finally {
       clearTimeout(timer);
     }
@@ -140,7 +142,7 @@ async function allLines({ fresh = false } = {}) {
 async function placeSearch(q) {
   if (String(q).trim().length < 3) return [];
   return cache.get(`place:${norm(q)}`, 6 * HOUR, async () => {
-    const json = await request(`${PLANNER}/search?${qs({ query: q })}`, { type: 'json', timeout: 8000, retries: 0 });
+    const json = await request(`${PLANNER}/search?${qs({ query: q })}`, { type: 'json', timeout: 8000, retries: 2 });
     const out = [];
     for (const s of json.stops || []) {
       out.push({ id: s.stopId, name: s.stopName, district: s.district || '', lat: s.point[0], lng: s.point[1], type: s.routeType || 'stop' });
@@ -275,7 +277,7 @@ async function vehicles(code) {
         method: 'POST',
         body: envelope,
         timeout: 8000,
-        retries: 0,
+        retries: 2,
         headers: { 'Content-Type': 'text/xml; charset=utf-8', SOAPAction: '"http://tempuri.org/GetHatOtoKonum_json"' },
       });
       const m = xml.match(/<GetHatOtoKonum_jsonResult>([\s\S]*?)<\/GetHatOtoKonum_jsonResult>/);
