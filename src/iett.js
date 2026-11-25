@@ -138,9 +138,9 @@ async function search(q, { limit = 25 } = {}) {
     const n = norm(s);
     return words.every((w) => n.includes(w));
   };
-  // Place search (nasilgiderim) is often the slowest part: give it 2.5 s, it keeps
+  // Place search (nasilgiderim) is often the slowest part: give it 1.2 s, it keeps
   // running and is cached for the next keystroke.
-  const placesSoon = Promise.race([placeSearch(q), sleep(2500).then(() => [])]);
+  const placesSoon = Promise.race([placeSearch(q), sleep(1200).then(() => [])]);
   const [iett, places] = await Promise.allSettled([rawSearch(key), placesSoon]);
   const res = iett.status === 'fulfilled' ? iett.value : { lines: [], stops: [] };
   const lines = res.lines
