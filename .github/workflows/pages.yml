@@ -11,6 +11,7 @@ on:
 
 permissions:
   contents: read
+  actions: read # deploy-pages lists this run's artifacts
   pages: write
   id-token: write
 
@@ -19,11 +20,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  deploy:
+  build:
     runs-on: ubuntu-latest
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - uses: actions/checkout@v6
       - name: Build site
@@ -35,10 +33,17 @@ jobs:
           cp -r public/. _site/
           printf "window.YK_API = '%s';\n" "$YK_API" > _site/config.js
           echo "ykmaps.kaymakci.us" > _site/CNAME
-          touch _site/.nojekyll
       - uses: actions/configure-pages@v6
       - uses: actions/upload-pages-artifact@v5
         with:
           path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
       - id: deployment
         uses: actions/deploy-pages@v5
