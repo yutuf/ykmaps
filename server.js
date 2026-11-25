@@ -74,6 +74,12 @@ const routes = [
   [/^\/api\/stop\/(\d+)$/, async (m) => {
     const code = m[1];
     const local = stopsIndex.get(code);
+    if (local) {
+      // Instant: everything we need is in the local index (+ line names from the line list).
+      const names = new Map((await I.allLines().catch(() => [])).map((l) => [l.code, l.name]));
+      I.stop(code).catch(() => {}); // warm the cache with İETT's own record in the background
+      return { code, name: local.name, district: local.district, lat: local.lat, lng: local.lng, lines: local.lines.map((c) => ({ code: c, name: names.get(c) || '' })) };
+    }
     try {
       const s = await I.stop(code);
       if (local) {
