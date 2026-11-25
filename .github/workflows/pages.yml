@@ -25,7 +25,7 @@ jobs:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Build site
         env:
           YK_API: ${{ vars.YK_API }}
@@ -36,9 +36,9 @@ jobs:
           printf "window.YK_API = '%s';\n" "$YK_API" > _site/config.js
           echo "ykmaps.kaymakci.us" > _site/CNAME
           touch _site/.nojekyll
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
         with:
           path: _site
       - id: deployment
-        uses: actions/deploy-pages@v4
+        uses: actions/deploy-pages@v5
