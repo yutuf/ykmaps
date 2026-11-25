@@ -1,5 +1,5 @@
 // Service worker: offline app shell + cached map tiles + notification clicks.
-const VERSION = 'ykmaps-v3';
+const VERSION = 'ykmaps-v4';
 const SHELL = [
   '/',
   '/index.html',
@@ -12,6 +12,7 @@ const SHELL = [
   '/js/ui.js',
   '/js/alarms.js',
   '/js/push.js',
+  '/config.js',
   '/css/fonts.css',
   '/fonts/barlow-latin-400-normal.woff2',
   '/fonts/barlow-latin-600-normal.woff2',
@@ -70,7 +71,7 @@ self.addEventListener('fetch', (e) => {
     );
     return;
   }
-  if (url.origin !== location.origin) return;
+  if (url.origin !== location.origin) return; // includes the API when it lives on another host
 
   // API: always network (live data); the page handles failures.
   if (url.pathname.startsWith('/api/')) return;

@@ -1,12 +1,15 @@
 // Thin client for the YKMaps server API (with a small memory cache + offline fallback).
 const mem = new Map();
 
+// When the UI is hosted elsewhere (e.g. GitHub Pages), config.js points this at the server.
+const BASE = String(window.YK_API || '').replace(/\/$/, '');
+
 async function get(path, { ttl = 0, signal } = {}) {
   const hit = mem.get(path);
   if (ttl && hit && Date.now() - hit.t < ttl) return hit.v;
   let res;
   try {
-    res = await fetch(path, { signal, headers: { Accept: 'application/json' } });
+    res = await fetch(BASE + path, { signal, headers: { Accept: 'application/json' } });
   } catch (e) {
     if (e.name === 'AbortError') throw e;
     if (hit) return { ...hit.v, _stale: true };
@@ -26,7 +29,7 @@ async function get(path, { ttl = 0, signal } = {}) {
 async function send(method, path, body) {
   let res;
   try {
-    res = await fetch(path, { method, headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+    res = await fetch(BASE + path, { method, headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: body ? JSON.stringify(body) : undefined });
   } catch {
     throw new Error('Bağlantı yok. İnternet bağlantınızı kontrol edin.');
   }
