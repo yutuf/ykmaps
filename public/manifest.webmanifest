@@ -1,0 +1,23 @@
+{
+  "name": "YKMaps — İstanbul Toplu Taşıma",
+  "short_name": "YKMaps",
+  "description": "Canlı otobüs varış süreleri, hatlar, sefer saatleri ve rota planlama. Reklamsız.",
+  "lang": "tr",
+  "start_url": "/#/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#0b8f6e",
+  "theme_color": "#0b8f6e",
+  "icons": [
+    { "src": "/icons/icon.svg", "sizes": "any", "type": "image/svg+xml" },
+    { "src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png" },
+    { "src": "/icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Yakınımdaki duraklar", "url": "/#/" },
+    { "name": "Nasıl Giderim", "url": "/#/plan" },
+    { "name": "Favoriler", "url": "/#/favorites" }
+  ]
+}
