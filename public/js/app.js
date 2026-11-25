@@ -7,7 +7,8 @@ import { initAlarms } from './alarms.js';
 import { viewStop } from './views/stop.js';
 import { viewLine } from './views/line.js';
 import { viewPlan, planTo, planFrom } from './views/plan.js';
-import { viewNearby, viewSearch, viewLines, viewFavorites, viewNews, viewNewsDetail, viewSettings, applyTheme } from './views/home.js';
+import { viewNearby, viewSearch, viewLines, viewFavorites, viewNews, viewNewsDetail, viewSettings, applyTheme, syncLineWatch } from './views/home.js';
+import { store } from './store.js';
 import { $, esc, toast } from './ui.js';
 
 applyTheme();
@@ -16,6 +17,14 @@ initSheetDrag();
 initAlarms();
 setBgStopsApi((b) => api.bbox(b));
 onStopClick((s) => navigate(`#/stop/${s.code}`));
+let lastFavKey = store.get().favLines.map((l) => l.code).join(',');
+store.subscribe((st) => {
+  const k = st.favLines.map((l) => l.code).join(',');
+  if (k !== lastFavKey) {
+    lastFavKey = k;
+    if (st.settings.lineWatch) syncLineWatch();
+  }
+});
 
 // Long-press on the map: plan from/to that point.
 onLongPress((ll) => {

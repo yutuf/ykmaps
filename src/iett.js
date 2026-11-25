@@ -324,6 +324,49 @@ async function plan({ from, to, time, date, opt = 'time', arriveBy = false }) {
   });
 }
 
+/**
+ * "Ne zaman çıkayım?": plan the same trip for several departure times and
+ * summarise each slot so the client can pick the most efficient one.
+ */
+async function planSweep({ from, to, time, date, opt = 'time', window = 120, step = 10 }) {
+  window = Math.max(20, Math.min(240, window));
+  step = Math.max(5, Math.min(30, step));
+  const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Istanbul' }));
+  const pad = (n) => String(n).padStart(2, '0');
+  let [h, mi] = /^\d{2}:\d{2}$/.test(time || '') ? time.split(':').map(Number) : [now.getHours(), now.getMinutes()];
+  const baseDate = /^\d{2}-\d{2}-\d{4}$/.test(date || '') ? date : `${pad(now.getDate())}-${pad(now.getMonth() + 1)}-${now.getFullYear()}`;
+  const slots = [];
+  for (let t = 0; t <= window; t += step) {
+    const total = h * 60 + mi + t;
+    if (total >= 24 * 60) break; // keep it to the same service day
+    slots.push(`${pad(Math.floor(total / 60))}:${pad(total % 60)}`);
+  }
+  const results = new Array(slots.length);
+  let next = 0;
+  async function worker() {
+    while (next < slots.length) {
+      const i = next++;
+      try {
+        const r = await plan({ from, to, time: slots[i], date: baseDate, opt });
+        const best = [...r.itineraries].sort((a, b) => a.duration - b.duration)[0];
+        results[i] = best
+          ? { slot: slots[i], start: best.start, end: best.end, duration: best.duration, walk: best.walk, transfers: best.transfers, fare: best.fare, legs: best.legs.filter((l) => l.mode !== 'walking').map((l) => ({ line: l.line || l.modeName, mode: l.mode })) }
+          : { slot: slots[i], none: true };
+      } catch (e) {
+        results[i] = { slot: slots[i], error: e.message };
+      }
+    }
+  }
+  await Promise.all([worker(), worker(), worker()]);
+  const ok = results.filter((r) => r.duration != null);
+  // De-duplicate slots that resolve to the same actual departure.
+  const uniq = [];
+  for (const r of ok) if (!uniq.some((u) => u.start === r.start && u.end === r.end)) uniq.push(r);
+  const best = [...uniq].sort((a, b) => a.duration - b.duration || a.start - b.start)[0] || null;
+  const earliest = [...uniq].sort((a, b) => a.end - b.end)[0] || null;
+  return { slots: results, options: uniq, best, earliest };
+}
+
 // ---------- announcements ----------
 
 async function announcements(page = 0) {
@@ -360,4 +403,4 @@ async function announcement(id) {
   return cache.get(`anndet:${id}`, 1 * HOUR, async () => P.parseAnnouncementDetail(await request(`${IETT}/Announcement/Detail/${id}`)));
 }
 
-module.exports = { search, allLines, placeSearch, stop, arrivals, line, lineAlerts, schedule, vehicles, plan, announcements, announcement, request, iettGet, rawSearch, _cache: cache };
+module.exports = { search, allLines, placeSearch, stop, arrivals, line, lineAlerts, schedule, vehicles, plan, planSweep, announcements, announcement, request, iettGet, rawSearch, _cache: cache };

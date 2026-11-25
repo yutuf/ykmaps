@@ -1,5 +1,5 @@
 // Service worker: offline app shell + cached map tiles + notification clicks.
-const VERSION = 'ykmaps-v2';
+const VERSION = 'ykmaps-v3';
 const SHELL = [
   '/',
   '/index.html',
@@ -11,6 +11,13 @@ const SHELL = [
   '/js/store.js',
   '/js/ui.js',
   '/js/alarms.js',
+  '/js/push.js',
+  '/css/fonts.css',
+  '/fonts/barlow-latin-400-normal.woff2',
+  '/fonts/barlow-latin-600-normal.woff2',
+  '/fonts/barlow-condensed-latin-800-italic.woff2',
+  '/fonts/silkscreen-latin-700-normal.woff2',
+  '/fonts/vt323-latin-400-normal.woff2',
   '/js/views/home.js',
   '/js/views/line.js',
   '/js/views/stop.js',
@@ -80,6 +87,28 @@ self.addEventListener('fetch', (e) => {
         })
         .catch(() => hit);
       return hit || net;
+    })
+  );
+});
+
+// Server-sent notifications (bus alarms, line changes) — arrive even when the app is closed.
+self.addEventListener('push', (e) => {
+  let d = {};
+  try {
+    d = e.data ? e.data.json() : {};
+  } catch {
+    d = { title: 'YKMaps', body: e.data && e.data.text() };
+  }
+  e.waitUntil(
+    self.registration.showNotification(d.title || 'YKMaps', {
+      body: d.body || '',
+      icon: '/icons/icon-192.png',
+      badge: '/icons/badge-96.png',
+      tag: d.tag || undefined,
+      renotify: !!d.tag,
+      vibrate: [300, 150, 300, 150, 600],
+      requireInteraction: /yaklaşıyor/.test(d.title || ''),
+      data: { url: d.url || '#/' },
     })
   );
 });

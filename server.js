@@ -7,6 +7,7 @@ const path = require('path');
 const zlib = require('zlib');
 const I = require('./src/iett');
 const stopsIndex = require('./src/stops-index');
+const push = require('./src/push-service');
 
 const PORT = Number(process.env.PORT) || 8080;
 const HOST = process.env.HOST || '0.0.0.0';
@@ -110,11 +111,68 @@ const routes = [
       opt: q.get('opt') || 'time',
       arriveBy: q.get('arriveBy') === '1',
     })],
+  ['/api/plan/sweep', async (m, q) =>
+    I.planSweep({
+      from: q.get('from'),
+      to: q.get('to'),
+      time: q.get('time'),
+      date: q.get('date'),
+      opt: q.get('opt') || 'time',
+      window: Number(q.get('window')) || 120,
+      step: Number(q.get('step')) || 10,
+    })],
   ['/api/announcements', async (m, q) => I.announcements(q.get('page') || 0), 300],
   [/^\/api\/announcement\/(\d+)$/, async (m) => I.announcement(m[1]), 3600],
 ];
 
+// Routes that change state (Web Push). [method, pattern, fn(match, body, query)]
+const writeRoutes = [
+  ['GET', '/api/push/key', async () => push.publicKey()],
+  ['POST', '/api/push/subscribe', async (m, b) => push.subscribe(b.subscription)],
+  ['POST', '/api/push/test', async (m, b) => push.test(b.sub)],
+  ['POST', '/api/push/watch', async (m, b) => push.setWatch(b.sub, b.lines)],
+  ['GET', '/api/push/alarms', async (m, b, q) => push.listAlarms(q.get('sub'))],
+  ['POST', '/api/push/alarms', async (m, b) => push.addAlarm(b)],
+  ['DELETE', /^\/api\/push\/alarms\/([\w-]+)$/, async (m, b, q) => push.removeAlarm(m[1], q.get('sub'))],
+];
+
+function readBody(req) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    const chunks = [];
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > 16 * 1024) {
+        reject(Object.assign(new Error('İstek çok büyük'), { status: 413 }));
+        req.destroy();
+      } else chunks.push(c);
+    });
+    req.on('end', () => {
+      try {
+        resolve(chunks.length ? JSON.parse(Buffer.concat(chunks).toString('utf8')) : {});
+      } catch {
+        reject(Object.assign(new Error('Geçersiz JSON'), { status: 400 }));
+      }
+    });
+    req.on('error', reject);
+  });
+}
+
 async function handleApi(req, res, url) {
+  for (const [method, pattern, fn] of writeRoutes) {
+    if (req.method !== method && !(method === 'GET' && req.method === 'HEAD')) continue;
+    const m = typeof pattern === 'string' ? (url.pathname === pattern ? [pattern] : null) : url.pathname.match(pattern);
+    if (!m) continue;
+    try {
+      const body = req.method === 'POST' ? await readBody(req) : {};
+      return json(req, res, 200, await fn(m, body, url.searchParams));
+    } catch (e) {
+      const status = e.status || 500;
+      if (status >= 500) console.error(`[api] ${req.method} ${url.pathname}:`, e.message);
+      return json(req, res, status, { error: e.message || 'Hata' });
+    }
+  }
+  if (req.method !== 'GET' && req.method !== 'HEAD') return json(req, res, 405, { error: 'Desteklenmeyen istek' });
   for (const [pattern, fn, maxAge] of routes) {
     const m = typeof pattern === 'string' ? (url.pathname === pattern ? [pattern] : null) : url.pathname.match(pattern);
     if (!m) continue;
@@ -149,11 +207,11 @@ function serveStatic(req, res, url) {
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
   if (req.method === 'OPTIONS') {
-    res.writeHead(204, { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Methods': 'GET', 'Access-Control-Allow-Headers': '*' });
+    res.writeHead(204);
     return res.end();
   }
-  if (req.method !== 'GET' && req.method !== 'HEAD') return send(req, res, 405, 'Method not allowed');
   if (url.pathname.startsWith('/api/')) return handleApi(req, res, url);
+  if (req.method !== 'GET' && req.method !== 'HEAD') return send(req, res, 405, 'Method not allowed');
   return serveStatic(req, res, url);
 });
 
@@ -166,6 +224,7 @@ function maybeRebuildIndex() {
 
 if (require.main === module) {
   stopsIndex.load();
+  if (process.env.DISABLE_PUSH !== '1') push.start();
   server.listen(PORT, HOST, () => {
     const st = stopsIndex.status();
     console.log(`YKMaps çalışıyor: http://localhost:${PORT}  (durak indeksi: ${st.stops} durak)`);

@@ -23,6 +23,18 @@ async function get(path, { ttl = 0, signal } = {}) {
   return data;
 }
 
+async function send(method, path, body) {
+  let res;
+  try {
+    res = await fetch(path, { method, headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  } catch {
+    throw new Error('Bağlantı yok. İnternet bağlantınızı kontrol edin.');
+  }
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Hata (${res.status})`);
+  return data;
+}
+
 const enc = encodeURIComponent;
 
 export const api = {
@@ -39,4 +51,14 @@ export const api = {
   announcements: (page = 0) => get(`/api/announcements?page=${page}`, { ttl: 300000 }),
   announcement: (id) => get(`/api/announcement/${enc(id)}`, { ttl: 3600000 }),
   status: () => get('/api/status'),
+  sweep: (p) => get(`/api/plan/sweep?${new URLSearchParams(p)}`),
+  push: {
+    key: () => get('/api/push/key', { ttl: 3600000 }),
+    subscribe: (subscription) => send('POST', '/api/push/subscribe', { subscription }),
+    test: (sub) => send('POST', '/api/push/test', { sub }),
+    watch: (sub, lines) => send('POST', '/api/push/watch', { sub, lines }),
+    alarms: (sub) => send('GET', `/api/push/alarms?sub=${enc(sub)}`),
+    addAlarm: (a) => send('POST', '/api/push/alarms', a),
+    removeAlarm: (id, sub) => send('DELETE', `/api/push/alarms/${enc(id)}?sub=${enc(sub)}`),
+  },
 };

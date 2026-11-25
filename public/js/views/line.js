@@ -34,7 +34,7 @@ export async function viewLine(token, code, query) {
   render(`
     <div class="view-head">
       ${lineBadge(data.code)}
-      <div style="flex:1;min-width:0"><h2 style="font-size:16px">${esc(titleCase(data.name))}</h2>
+      <div style="flex:1;min-width:0"><div class="kicker"><span class="label">Hat ${esc(data.code)}</span></div><h2 style="font-size:19px">${esc(titleCase(data.name))}</h2>
         <div class="sub" id="vehInfo"></div></div>
       <button class="star-btn ${store.isFavLine(data.code) ? 'on' : ''}" id="favBtn" aria-label="Favori">${icon(store.isFavLine(data.code) ? 'star' : 'star-o')}</button>
     </div>
@@ -189,12 +189,20 @@ export async function viewLine(token, code, query) {
       if (!byHour.has(h)) byHour.set(h, []);
       byHour.get(h).push([tm, i]);
     });
+    const lastMin = mins.length ? mins[mins.length - 1] : null;
+    const toLast = isToday && lastMin != null ? lastMin - nowMin : null;
+    const firstLast = list.length
+      ? `<div class="first-last"><div><span class="label">İlk sefer</span><b>${list[0]}</b></div>
+         <div class="${toLast != null && toLast >= 0 && toLast <= 60 ? 'warn' : ''}"><span class="label">Son sefer</span><b>${list[list.length - 1]}</b>${toLast != null && toLast >= 0 && toLast <= 120 ? `<small>${toLast} dk kaldı</small>` : ''}</div>
+         <div><span class="label">Sefer</span><b>${list.length}</b></div></div>`
+      : '';
     const nextTxt = nextIdx >= 0 ? `Sonraki sefer <b>${list[nextIdx]}</b> (${mins[nextIdx] - nowMin} dk sonra)` : isToday ? 'Bugün için sefer kalmadı' : '';
     body.innerHTML = `
       <div class="seg" id="days">
         <button data-day="weekday">İş Günü</button><button data-day="saturday">Cumartesi</button><button data-day="sunday">Pazar</button>
       </div>
       <div class="sub" style="margin:4px 0 2px"><b>${esc(titleCase(t.title))}</b>${nextTxt ? ` · ${nextTxt}` : ''}</div>
+      ${firstLast}
       ${list.length ? '' : '<div class="empty"><p>Bu gün için sefer yok.</p></div>'}
       ${[...byHour.entries()]
         .map(

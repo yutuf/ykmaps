@@ -3,6 +3,7 @@ import { store } from './store.js';
 import { api } from './api.js';
 import { onUserPos, startLocation } from './map.js';
 import { haversine, toast, esc, icon, fmtDist } from './ui.js';
+import { ensurePush, pushSubId } from './push.js';
 
 let pollTimer = null;
 let dest = loadDest(); // {name, lat, lng, radius}
@@ -76,7 +77,18 @@ async function checkBusAlarms() {
   const alarms = store.get().alarms;
   if (!alarms.length) return stopPolling();
   const byStop = new Map();
+  const serverOnes = alarms.filter((a) => a.server);
+  if (serverOnes.length && pushSubId()) {
+    try {
+      const { alarms: live } = await api.push.alarms(pushSubId());
+      const ids = new Set(live.map((x) => x.id));
+      for (const a of serverOnes) if (!ids.has(a.server)) store.removeAlarm(a.id); // fired or expired on the server
+    } catch {
+      /* offline: keep */
+    }
+  }
   for (const a of alarms) {
+    if (a.server) continue;
     if (Date.now() - a.created > 3 * 3600 * 1000) {
       store.removeAlarm(a.id); // expire after 3h
       continue;
@@ -112,10 +124,26 @@ function stopPolling() {
 }
 
 export async function addBusAlarm({ stop, stopName, line, minutes }) {
-  await ensureNotifyPermission();
-  store.addAlarm({ stop, stopName, line, minutes });
-  toast(`${line} için alarm kuruldu: ${minutes} dk kala haber vereceğim`);
+  // Prefer a server-side alarm (works while the app is closed); fall back to in-app polling.
+  const sub = await ensurePush();
+  let server = null;
+  if (sub) {
+    try {
+      server = (await api.push.addAlarm({ sub, stop, stopName, line, minutes })).id;
+    } catch {
+      server = null;
+    }
+  } else await ensureNotifyPermission();
+  store.addAlarm({ stop, stopName, line, minutes, server });
+  toast(server ? `${line} ${minutes} dk kala bildirim gelecek — uygulamayı kapatabilirsin` : `${line} için alarm kuruldu (uygulama açık kalmalı)`, 4000);
   startPolling();
+  renderBar();
+}
+
+export async function removeBusAlarm(id) {
+  const a = store.get().alarms.find((x) => x.id === id);
+  store.removeAlarm(id);
+  if (a?.server && pushSubId()) api.push.removeAlarm(a.server, pushSubId()).catch(() => {});
   renderBar();
 }
 
@@ -183,7 +211,7 @@ export function renderBar() {
   const bar = document.getElementById('alarmBar');
   const alarms = store.get().alarms;
   const parts = [];
-  if (alarms.length) parts.push(alarms.map((a) => `${esc(a.line)} @ ${esc(a.stopName)} (≤${a.minutes} dk)`).join(', '));
+  if (alarms.length) parts.push(alarms.map((a) => `${esc(a.line)} @ ${esc(a.stopName)} (≤${a.minutes} dk)${a.server ? ' 🔔' : ''}`).join(', '));
   if (dest) parts.push(`İniş: ${esc(dest.name)}${lastDist != null ? ` · ${fmtDist(lastDist)}` : ''}`);
   if (!parts.length) {
     bar.hidden = true;
@@ -201,10 +229,10 @@ export function renderBar() {
     if (opts.length > 1) opts.push({ label: 'Hepsini kapat', value: 'all', icon: 'trash', danger: true });
     const v = await actionSheet('Alarmlar', opts);
     if (v === 'all') {
-      alarms.forEach((a) => store.removeAlarm(a.id));
+      alarms.forEach((a) => removeBusAlarm(a.id));
       clearDestAlarm();
     } else if (v === 'dest') clearDestAlarm();
-    else if (v) store.removeAlarm(v);
+    else if (v) removeBusAlarm(v);
     renderBar();
   };
 }

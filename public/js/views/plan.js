@@ -5,6 +5,7 @@ import { store } from '../store.js';
 import { render, setSheet, isCurrent, onLeave, navigate } from '../core.js';
 import { addToView, routeLine, pointMarker, fit, getUserPos, startLocation, getMap, clearView } from '../map.js';
 import { setDestAlarm } from '../alarms.js';
+import { catchVerdict } from './stop.js';
 import {
   esc, icon, lineBadge, loading, errorBox, empty, titleCase, toast, fmtTime, fmtDist, debounce, lineColor, modeIcon, istNow, promptModal, $, $$,
 } from '../ui.js';
@@ -297,7 +298,7 @@ function drawResults(token) {
     res.innerHTML = empty(r.error === 'NO_ROUTE_POSSIBLE' ? 'Bu iki nokta arasında toplu taşıma rotası bulunamadı. Farklı bir saat veya seçenek deneyin.' : 'Rota bulunamadı.', 'route');
     return;
   }
-  res.innerHTML = r.itineraries
+  res.innerHTML = `<button class="btn ghost block" id="sweepBtn" style="margin-top:4px">${icon('clock')} Ne zaman çıkayım? En verimli saat</button><div id="sweep"></div>` + r.itineraries
     .map(
       (it, i) => `<div class="itin" data-i="${i}">
       <div class="top"><div class="dur">${it.duration}<small> dk</small></div><div class="when">${fmtTime(it.start)} – ${fmtTime(it.end)}</div></div>
@@ -313,7 +314,81 @@ function drawResults(token) {
     };
     el.onmouseenter = () => previewItin(r.itineraries[Number(el.dataset.i)], false);
   });
+  $('#sweepBtn').onclick = () => runSweep(token);
+  if (S.sweep && S.sweep.key === S.key) drawSweep(token);
   previewItin(r.itineraries[0], true);
+}
+
+// ---------- "Ne zaman çıkayım?" ----------
+
+async function runSweep(token) {
+  const box = $('#sweep');
+  const btn = $('#sweepBtn');
+  btn.disabled = true;
+  box.innerHTML = loading('Önümüzdeki 2 saat taranıyor (13 farklı çıkış saati)…');
+  const [y, m, d] = (S.date || '').split('-');
+  const params = { from: `${S.from.lat},${S.from.lng}`, to: `${S.to.lat},${S.to.lng}`, opt: S.opt, window: 120, step: 10 };
+  if (S.when === 'depart') {
+    params.time = S.time;
+    params.date = `${d}-${m}-${y}`;
+  }
+  const key = S.key;
+  try {
+    const r = await api.sweep(params);
+    if (!isCurrent(token) || S.key !== key) return;
+    S.sweep = { key, data: r };
+    drawSweep(token);
+  } catch (e) {
+    if (!isCurrent(token)) return;
+    box.innerHTML = errorBox(e);
+    box.querySelector('[data-retry]').onclick = () => runSweep(token);
+  } finally {
+    if (btn.isConnected) btn.disabled = false;
+  }
+}
+
+function drawSweep(token) {
+  const box = $('#sweep');
+  const { data } = S.sweep;
+  const opts = data.options;
+  if (!opts.length) {
+    box.innerHTML = empty('Önümüzdeki 2 saatte rota bulunamadı.', 'clock');
+    return;
+  }
+  const best = opts.find((o) => o.start === data.best.start && o.end === data.best.end) || opts[0];
+  const max = Math.max(...opts.map((o) => o.duration));
+  const firstNow = opts[0];
+  const saved = firstNow.duration - best.duration;
+  const waitMin = Math.round((best.start - Date.now()) / 60000);
+  const why = best === firstNow
+    ? 'Şu an çıkmak zaten en kısa yolculuk. Beklemenin faydası yok.'
+    : `${fmtTime(firstNow.start)}'de çıkarsan ${firstNow.duration} dk, ${fmtTime(best.start)}'de çıkarsan ${best.duration} dk sürüyor: <b>${saved} dk</b> daha az yolda kalırsın.`;
+  const earliest = data.earliest && !(data.earliest.start === best.start && data.earliest.end === best.end) ? data.earliest : null;
+  box.innerHTML = `
+    <div class="leave">
+      <div class="label">En verimli çıkış</div>
+      <div class="big">${fmtTime(best.start)}</div>
+      <div class="why">${waitMin > 1 ? `${waitMin} dk sonra · ` : ''}${best.duration} dk yolculuk · varış ${fmtTime(best.end)} · ${best.transfers ? `${best.transfers} aktarma` : 'aktarmasız'}<br>${why}</div>
+      ${earliest ? `<div class="why">En erken varış için ${fmtTime(earliest.start)}'de çık → ${fmtTime(earliest.end)}'de oradasın.</div>` : ''}
+    </div>
+    <div class="label" style="margin-top:12px">Çıkış saatine göre yolculuk süresi (dk)</div>
+    <div class="sweep">${opts
+      .map((o, i) => `<div class="bar ${o === best ? 'best' : ''}" data-i="${i}" title="${fmtTime(o.start)} → ${o.duration} dk"><span>${o.duration}</span><i style="height:${Math.round((o.duration / max) * 100)}%"></i></div>`)
+      .join('')}</div>
+    <div class="sweep-x">${opts.map((o) => `<span>${fmtTime(o.start)}</span>`).join('')}</div>
+    <div class="note">${icon('info')}<span>Bir çubuğa dokunarak o saatteki rotaları gör. Planlı sefer saatlerine göre hesaplanır; trafik hesaba katılmaz.</span></div>`;
+  $$('#sweep .bar').forEach((b) => {
+    b.onclick = () => {
+      const o = opts[Number(b.dataset.i)];
+      const pad = (n) => String(n).padStart(2, '0');
+      const ist = new Date(new Date(o.start).toLocaleString('en-US', { timeZone: 'Europe/Istanbul' }));
+      S.when = 'depart';
+      S.time = `${pad(ist.getHours())}:${pad(ist.getMinutes())}`;
+      S.date = `${ist.getFullYear()}-${pad(ist.getMonth() + 1)}-${pad(ist.getDate())}`;
+      S.results = null;
+      drawForm(token);
+    };
+  });
 }
 
 function drawItinOnMap(it) {
@@ -386,6 +461,8 @@ function drawDetail(token) {
     S.sel = -1;
     drawForm(token);
   };
+  document.getElementById('view').scrollTop = 0;
+  liveLeaveCard(token, it);
   $$('[data-off]').forEach((b) => {
     b.onclick = () => {
       const l = it.legs[Number(b.dataset.off)];
@@ -400,6 +477,41 @@ function drawDetail(token) {
     store.savePlace({ label, name: S.to.name, lat: S.to.lat, lng: S.to.lng });
     toast(`"${label}" kaydedildi`);
   };
+}
+
+/** For a trip that starts with a bus: compare live arrivals with the walk to the stop. */
+async function liveLeaveCard(token, it) {
+  const idx = it.legs.findIndex((l) => l.mode !== 'walking');
+  if (idx < 0) return;
+  const leg = it.legs[idx];
+  const stopId = leg.stops[0]?.id;
+  if (!/^\d+$/.test(stopId || '') || !['bus', 'metrobus'].includes(leg.mode)) return;
+  const walk = idx === 0 ? 0 : Math.max(1, Math.round(it.legs.slice(0, idx).reduce((n, l) => n + (l.end - l.start), 0) / 60000));
+  const box = document.createElement('div');
+  $('.steps').before(box);
+  const draw = async () => {
+    try {
+      const { arrivals } = await api.arrivals(stopId);
+      if (!isCurrent(token) || !box.isConnected) return;
+      const mine = arrivals.filter((a) => a.line === leg.line && a.minutes != null);
+      if (!mine.length) {
+        box.innerHTML = `<div class="note">${icon('clock')}<span>${esc(leg.line)} için şu an ${esc(leg.stops[0].name)} durağına yaklaşan araç görünmüyor; planlı saat ${fmtTime(leg.start)}.</span></div>`;
+        return;
+      }
+      const ok = mine.find((a) => a.minutes >= walk) || mine[0];
+      const after = mine.find((a) => a.minutes > ok.minutes);
+      const v = catchVerdict(ok.minutes, walk);
+      const head = !v || v.cls === 'miss' ? 'Yetişemezsin' : ok.minutes - walk > 1 ? `${ok.minutes - walk} dk içinde çık` : 'Hemen çık!';
+      box.innerHTML = `<div class="leave"><div class="label">Canlı · ${esc(leg.line)} · ${esc(leg.stops[0].name)}</div>
+        <div class="big">${head}</div>
+        <div class="why">Otobüs durağa ${ok.minutes} dk sonra (${esc(ok.time || '')}) geliyor, durağa yürümen ~${walk} dk.${after ? ` Kaçırırsan sonraki ${after.minutes} dk sonra.` : ''}</div></div>`;
+    } catch {
+      /* the plan still shows without it */
+    }
+  };
+  draw();
+  const t = setInterval(draw, 30000);
+  onLeave(() => clearInterval(t));
 }
 
 /** Allow other views to start a plan. */

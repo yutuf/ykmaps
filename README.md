@@ -8,7 +8,12 @@ Otobüsünün nerede olduğunu ve bir yere nasıl gideceğini gösteren, reklams
 |---|---|
 | **Yakınımdaki duraklar** | Konumuna en yakın duraklar, mesafeleri, geçen hatlar ve her durak için **canlı varış süreleri**. Yürüdükçe liste güncellenir. "Harita merkezi" ile başka bir bölgeye bakabilirsin. |
 | **Durak ekranı (otobüsüm nerede)** | Durağa gelen tüm otobüsler, kaç dakika kaldığı, sonraki seferler. 20 sn'de bir otomatik yenilenir. Hatta göre filtrelenebilir. |
-| **Otobüs yaklaşınca alarm** | Durakta bir hattın yanındaki 🔔'a dokun: otobüs 2/5/10/15 dk kala bildirim, titreşim ve ses. |
+| **Otobüs yaklaşınca alarm** | Durakta bir hattın yanındaki 🔔'a dokun: otobüs 2/5/10/15 dk kala (ya da "çıkma vaktim gelince") bildirim gelir. Sunucu takip ettiği için **uygulama kapalıyken de** çalışır (Web Push). |
+| **Yetişir misin?** | Durak ekranı ve rota detayı, durağa yürüme süreni canlı varışla karşılaştırır: "3 dk içinde çık", "Yetişemezsin — sonraki 12 dk". |
+| **Ne zaman çıkayım?** | Rota sonuçlarında: önümüzdeki 2 saatteki 13 çıkış saatini dener, en kısa yolculuğu ve en erken varışı gösterir; grafikten saat seçebilirsin. |
+| **Favori hat değişiklik bildirimi** | Favori hatlarında güzergah değişikliği, yol çalışması ya da o hattı anan yeni bir İETT duyurusu çıkınca bildirim. |
+| **İlk / son sefer** | Sefer saatlerinde ilk ve son sefer, son sefere kalan süre. |
+| **İki tema** | LP-50 (açık: kâğıt, piksel etiketler, LCD durak panosu) ve Circuit (koyu: yarış siyahı, kırmızı, condensed italik). |
 | **İneceğim durakta uyar** | Hat ekranında bir durağın 🚩 düğmesi ya da rota detayında "İneceğim yerde uyar": GPS ile durağa ~400 m kala uyarır (ekran açık kalır). |
 | **Hat ekranı** | Güzergah haritada, iki yön, tüm duraklar (sana en yakın durak işaretli), **sefer saatleri** (iş günü/Cumartesi/Pazar, sıradaki sefer vurgulu), hatla ilgili **anlık uyarılar** (güzergah değişikliği, yol çalışması). |
 | **Nasıl Giderim** | Otobüs, metro, metrobüs, Marmaray, tramvay, vapur, dolmuş dahil rota planlama. Seçenekler: en hızlı / az aktarma / az yürüme / raylı öncelikli; şimdi, kalkış ya da varış saatine göre. Süre, yürüme mesafesi, ücret, aktarma sayısı; adım adım tarif ve harita. |
@@ -64,6 +69,8 @@ Yurt dışındaki sunucularda İBB'nin `api.ibb.gov.tr` servisi yabancı IP'leri
 | `HOST` | `0.0.0.0` | Dinlenen adres |
 | `DISABLE_CRAWL` | — | `1` ise durak indeksi otomatik yenilenmez |
 | `STOPS_FILE` / `LINES_FILE` | `data/…json` | İndeks dosyalarının yeri |
+| `DATA_DIR` | `data/` | Bildirim anahtarı (`vapid.json`) ve abonelik/alarm kayıtları (`push.json`) |
+| `DISABLE_PUSH` | — | `1` ise sunucu tarafı bildirimler kapalı |
 
 Durak indeksini elle yenilemek: `npm run build-stops` (~5 dk).
 

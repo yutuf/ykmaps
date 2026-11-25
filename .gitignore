@@ -2,3 +2,5 @@ node_modules/
 *.log
 data/*.tmp
 .env
+data/vapid.json
+data/push.json

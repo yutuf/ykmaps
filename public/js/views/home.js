@@ -4,7 +4,7 @@ import { api } from '../api.js';
 import { store } from '../store.js';
 import { render, setSheet, isCurrent, liveInterval, navigate, onLeave } from '../core.js';
 import { addToView, getUserPos, startLocation, onUserPos, fit, getMap, flyTo, stopMarker, refreshTiles } from '../map.js';
-import { ensureNotifyPermission } from '../alarms.js';
+import { ensurePush, pushSupported, pushSubId } from '../push.js';
 import { planTo, planFrom } from './plan.js';
 import {
   esc, icon, lineBadge, loading, errorBox, empty, titleCase, toast, fmtDist, fmtMin, debounce, modeIcon, actionSheet, promptModal, $, $$,
@@ -19,7 +19,7 @@ export async function viewNearby(token) {
   let usingMapCenter = false;
 
   render(`
-    <div class="view-head"><div style="flex:1"><h2>Yakınımdaki duraklar</h2><div class="sub" id="nearSub">Konum bekleniyor…</div></div>
+    <div class="view-head"><div style="flex:1"><div class="kicker"><span class="wordmark"><b>YK</b><i>MAPS</i></span></div><h2>Yakınımdaki duraklar</h2><div class="sub" id="nearSub">Konum bekleniyor…</div></div>
       <button class="btn small ghost" id="mapCenterBtn">${icon('pin')} Harita merkezi</button></div>
     <div class="quick-places" id="qp">
       ${['Ev', 'İş'].map((lbl) => {
@@ -467,9 +467,12 @@ export async function viewSettings(token) {
   const s = store.get().settings;
   render(`
     <div class="view-head"><h2>Ayarlar</h2></div>
-    <div class="kv"><span class="k">Tema</span><select id="theme" class="input" style="width:auto;padding:6px 10px"><option value="auto">Otomatik</option><option value="light">Açık</option><option value="dark">Koyu</option></select></div>
+    <div class="kv"><span class="k">Tema<small>LP-50 (açık) · Circuit (koyu)</small></span><select id="theme" class="input"><option value="auto">Otomatik</option><option value="light">LP-50</option><option value="dark">Circuit</option></select></div>
     <div class="kv"><span class="k">Canlı yenileme</span><select id="refresh" class="input" style="width:auto;padding:6px 10px">${[15, 20, 30, 60].map((n) => `<option value="${n}">${n} sn</option>`).join('')}</select></div>
-    <div class="kv"><span class="k">Bildirimler</span><button class="btn small ghost" id="notif">${'Notification' in window && Notification.permission === 'granted' ? 'Açık ✓' : 'İzin ver'}</button></div>
+    <div class="section-title">Bildirimler</div>
+    <div class="kv"><span class="k">Arka plan bildirimleri<small id="pushState">Uygulama kapalıyken de otobüs alarmı gelir</small></span><button class="btn small ghost" id="notif">Aç</button></div>
+    <div class="kv"><span class="k">Favori hatlarımda değişiklik<small>Güzergah değişikliği, yol çalışması, yeni duyuru</small></span><label class="switch"><input type="checkbox" id="lineWatch"><span></span></label></div>
+    <div class="kv"><span class="k">Test bildirimi</span><button class="btn small ghost" id="testPush">Gönder</button></div>
     <div class="kv" id="installRow" hidden><span class="k">Ana ekrana ekle</span><button class="btn small" id="install">Yükle</button></div>
     <div class="section-title">Veri</div>
     <div class="kv"><span class="k">Durak indeksi</span><span class="v" id="idx">…</span></div>
@@ -484,9 +487,47 @@ export async function viewSettings(token) {
     applyTheme();
   };
   $('#refresh').onchange = (e) => store.setSetting('refresh', Number(e.target.value));
+  const pushState = () => {
+    if (!pushSupported()) return 'Bu tarayıcı desteklemiyor (iPhone: önce ana ekrana ekleyin)';
+    if (Notification.permission === 'denied') return 'Tarayıcı ayarlarından bildirime izin verin';
+    return pushSubId() && Notification.permission === 'granted' ? 'Açık ✓ — uygulama kapalıyken de çalışır' : 'Kapalı';
+  };
+  const refreshPush = () => {
+    $('#pushState').textContent = pushState();
+    $('#notif').textContent = pushSubId() && Notification.permission === 'granted' ? 'Açık ✓' : 'Aç';
+  };
+  refreshPush();
   $('#notif').onclick = async () => {
-    const ok = await ensureNotifyPermission();
-    $('#notif').textContent = ok ? 'Açık ✓' : 'İzin verilmedi';
+    const id = await ensurePush();
+    refreshPush();
+    toast(id ? 'Arka plan bildirimleri açıldı' : 'Bildirim açılamadı');
+  };
+  $('#lineWatch').checked = !!s.lineWatch;
+  $('#lineWatch').onchange = async (e) => {
+    if (e.target.checked) {
+      const id = await ensurePush();
+      if (!id) {
+        e.target.checked = false;
+        return toast('Önce bildirime izin verin');
+      }
+      store.setSetting('lineWatch', true);
+      await syncLineWatch();
+      toast(`${store.get().favLines.length} favori hat izleniyor`);
+    } else {
+      store.setSetting('lineWatch', false);
+      await syncLineWatch();
+    }
+    refreshPush();
+  };
+  $('#testPush').onclick = async () => {
+    const id = await ensurePush();
+    if (!id) return toast('Önce bildirime izin verin');
+    try {
+      await api.push.test(id);
+      toast('Gönderildi — birkaç saniye içinde gelmeli');
+    } catch (err) {
+      toast(err.message);
+    }
   };
   $('#clrRec').onclick = () => {
     store.clearRecents();
@@ -509,6 +550,18 @@ export async function viewSettings(token) {
       : i.building ? 'Oluşturuluyor…' : 'Yok';
   } catch {
     $('#idx').textContent = 'Sunucuya ulaşılamadı';
+  }
+}
+
+/** Tell the server which favourite lines to watch for changes. */
+export async function syncLineWatch() {
+  const id = pushSubId();
+  if (!id) return;
+  const on = store.get().settings.lineWatch;
+  try {
+    await api.push.watch(id, on ? store.get().favLines.map((l) => l.code) : []);
+  } catch {
+    /* retried on next change */
   }
 }
 
