@@ -290,7 +290,7 @@ async function vehicles(code) {
           direction: v.yon || '',
           route: v.guzergahkodu || '',
           nearStop: v.yakinDurakKodu ? String(v.yakinDurakKodu) : '',
-          time: v.son_konum_saati || v.Saat || '',
+          time: String(v.son_konum_zamani || v.son_konum_saati || v.Saat || '').replace(/^.*\s(\d{1,2}:\d{2}).*$/, '$1'),
         }))
         .filter((v) => Number.isFinite(v.lat) && Number.isFinite(v.lng));
       return { available: true, vehicles: list, updated: Date.now() };
