@@ -42,7 +42,11 @@ async function request(url, { method = 'GET', body, headers = {}, timeout = 2000
       clearTimeout(timer);
     }
   }
-  if (lastErr.name === 'AbortError') throw Object.assign(new Error('Kaynak zaman aşımına uğradı'), { status: 504 });
+  if (lastErr.name === 'AbortError') throw Object.assign(new Error('İETT servisi zamanında cevap vermedi, tekrar deneyin'), { status: 504 });
+  if (lastErr instanceof TypeError) {
+    // Network-level failure (DNS, refused, no route): never show raw "fetch failed" to the user.
+    throw Object.assign(new Error('Sunucu İETT servisine bağlanamadı. İnternet bağlantısını kontrol edip tekrar deneyin.'), { status: 502 });
+  }
   throw lastErr;
 }
 
