@@ -129,7 +129,7 @@ function score(itemNorm, codeNorm, qn) {
   return 4;
 }
 
-async function search(q, { limit = 25 } = {}) {
+async function search(q, { limit = 25, near: nearPos = null } = {}) {
   const key = requestKey(q);
   if (!key) return { lines: [], stops: [], places: [] };
   const qn = norm(q);
@@ -138,10 +138,13 @@ async function search(q, { limit = 25 } = {}) {
     const n = norm(s);
     return words.every((w) => n.includes(w));
   };
-  // Place search (nasilgiderim) is often the slowest part: give it 1.2 s, it keeps
+  // Place search is often the slowest part: give it 1.5 s, it keeps
   // running and is cached for the next keystroke.
   const looksLikeLine = /^[0-9][0-9A-ZÇĞİÖŞÜ.\-/]{0,7}$/i.test(String(q).trim());
-  const placesSoon = looksLikeLine ? Promise.resolve([]) : Promise.race([placeSearch(q), sleep(1200).then(() => [])]);
+  let placesPending = false;
+  const placesSoon = looksLikeLine
+    ? Promise.resolve([])
+    : Promise.race([placeSearch(q, nearPos), sleep(1500).then(() => ((placesPending = true), []))]);
   const [iett, places] = await Promise.allSettled([rawSearch(key), placesSoon]);
   const res = iett.status === 'fulfilled' ? iett.value : { lines: [], stops: [] };
   const lines = res.lines
@@ -160,6 +163,7 @@ async function search(q, { limit = 25 } = {}) {
     lines,
     stops,
     places: places.status === 'fulfilled' ? places.value : [],
+    placesPending, // the client asks again shortly; the result is cached by then
     error: iett.status === 'rejected' ? iett.reason.message : undefined,
   };
 }
@@ -200,19 +204,76 @@ async function allLines({ fresh = false } = {}) {
   });
 }
 
-async function placeSearch(q) {
+// Places: OpenStreetMap (Photon) for addresses / schools / shops / anything, plus İETT's
+// planner index for transit stations. İETT's own POI list is small, so it only fills gaps.
+const PHOTON = 'https://photon.komoot.io/api/';
+const IST_BBOX = '27.95,40.80,29.95,41.60';
+
+function photonLabel(p) {
+  const name = p.name || [p.street, p.housenumber].filter(Boolean).join(' ') || p.city || '';
+  const parts = [p.name && p.street ? `${p.street}${p.housenumber ? ` ${p.housenumber}` : ''}` : '', p.district || p.locality || '', p.county || p.city || ''];
+  return { name, district: [...new Set(parts.filter(Boolean))].filter((x) => x !== name).join(', ') };
+}
+
+async function photonSearch(q, near) {
+  const params = { q, limit: 10, bbox: IST_BBOX };
+  if (near) Object.assign(params, { lat: near.lat.toFixed(3), lon: near.lng.toFixed(3) });
+  const json = await request(`${PHOTON}?${qs(params)}`, { type: 'json', timeout: 6000, retries: 1, headers: { 'User-Agent': 'ykmaps (personal transit app)' } });
+  const out = [];
+  for (const f of json.features || []) {
+    const [lng, lat] = f.geometry?.coordinates || [];
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) continue;
+    const p = f.properties || {};
+    const { name, district } = photonLabel(p);
+    if (!name) continue;
+    out.push({ id: `osm:${p.osm_type || ''}${p.osm_id || ''}`, name, district, lat: +lat.toFixed(6), lng: +lng.toFixed(6), type: 'poi', kind: p.osm_value || p.type || '' });
+  }
+  return out;
+}
+
+async function plannerPlaces(q) {
+  const json = await request(`${PLANNER}/search?${qs({ query: q })}`, { type: 'json', timeout: 8000, retries: 1 });
+  const out = [];
+  for (const s of json.stops || []) out.push({ id: s.stopId, name: s.stopName, district: s.district || '', lat: s.point[0], lng: s.point[1], type: s.routeType || 'stop' });
+  for (const s of json.pois || []) out.push({ id: s.stopId, name: s.stopName, district: s.district || '', lat: s.point[0], lng: s.point[1], type: 'poi' });
+  return out;
+}
+
+const near = (a, b) => Math.abs(a.lat - b.lat) < 0.001 && Math.abs(a.lng - b.lng) < 0.0013; // ~100 m
+
+/** Rank places: every query word present in the name first, then OSM before İETT POIs. */
+function rankPlaces(q, list) {
+  const words = norm(q).split(' ').filter(Boolean);
+  const score = (p) => {
+    const n = norm(p.name);
+    const all = words.every((w) => n.includes(w));
+    const starts = n.startsWith(words[0] || '');
+    return (all ? 0 : 10) + (starts ? 0 : 1) + (p.type === 'poi' && !p.id.startsWith('osm:') ? 2 : 0);
+  };
+  return list.map((p, i) => [score(p), i, p]).sort((a, b) => a[0] - b[0] || a[1] - b[1]).map((x) => x[2]);
+}
+
+async function placeSearch(q, nearPos = null) {
   if (String(q).trim().length < 3) return [];
-  return cache.get(`place:${norm(q)}`, 6 * HOUR, async () => {
-    const json = await request(`${PLANNER}/search?${qs({ query: q })}`, { type: 'json', timeout: 8000, retries: 1 });
-    const out = [];
-    for (const s of json.stops || []) {
-      out.push({ id: s.stopId, name: s.stopName, district: s.district || '', lat: s.point[0], lng: s.point[1], type: s.routeType || 'stop' });
+  const bias = nearPos ? `${nearPos.lat.toFixed(2)},${nearPos.lng.toFixed(2)}` : '';
+  return cache.get(`place:${norm(q)}:${bias}`, 6 * HOUR, async () => {
+    // Photon is fast; İETT's planner index is often slow, so once Photon answers we give
+    // İETT at most one more second.
+    let osmErr = null;
+    const osmP = photonSearch(q, nearPos).catch((e) => ((osmErr = e), null));
+    const iettP = plannerPlaces(q).catch(() => null);
+    const osm = await osmP;
+    const iett = await Promise.race([iettP, sleep(osm ? 1000 : 8000).then(() => null)]);
+    if (!osm && !iett) throw osmErr || new Error('Yer araması başarısız');
+    const transit = iett ? iett.filter((p) => p.type !== 'poi') : [];
+    const iettPois = iett ? iett.filter((p) => p.type === 'poi') : [];
+    const merged = [];
+    for (const p of [...(osm || []), ...transit, ...iettPois]) {
+      if (merged.some((m) => near(m, p) && norm(m.name) === norm(p.name))) continue;
+      merged.push(p);
     }
-    for (const s of json.pois || []) {
-      out.push({ id: s.stopId, name: s.stopName, district: s.district || '', lat: s.point[0], lng: s.point[1], type: 'poi' });
-    }
-    return out;
-  });
+    return rankPlaces(q, merged).slice(0, 20);
+  }, { stale: 7 * DAY });
 }
 
 // ---------- stops ----------

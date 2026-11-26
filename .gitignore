@@ -4,3 +4,4 @@ data/*.tmp
 .env
 data/vapid.json
 data/push.json
+data/netprobe.csv

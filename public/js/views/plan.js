@@ -131,7 +131,12 @@ function drawForm(token) {
     if (q.trim().length < 2) return showQuick();
     sug.innerHTML = `<div class="suggest-list">${loading('Aranıyor…')}</div>`;
     try {
-      const r = await api.search(q);
+      let r = await api.search(q, { near: getUserPos() || getMap().getCenter() });
+      for (let i = 0; r.placesPending && i < 3; i++) {
+        await new Promise((res) => setTimeout(res, 1300));
+        if (active !== which) return;
+        r = await api.search(q, { near: getUserPos() || getMap().getCenter(), fresh: true });
+      }
       if (active !== which) return;
       const items = [];
       for (const p of r.places) items.push({ name: p.name, sub: [p.district, placeType(p.type)].filter(Boolean).join(' · '), lat: p.lat, lng: p.lng, ic: p.type === 'poi' ? 'pin' : modeIcon(p.type) });

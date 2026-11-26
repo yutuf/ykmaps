@@ -181,13 +181,17 @@ export function viewSearch(token, query) {
     });
   };
 
-  const run = async (q) => {
+  let pendingRetry = null;
+  const run = async (q, fresh = 0) => {
+    clearTimeout(pendingRetry);
     if (!isCurrent(token)) return;
     history.replaceState(null, '', `#/search?q=${encodeURIComponent(q)}${saveLabel ? `&save=${encodeURIComponent(saveLabel)}` : ''}`);
     if (q.trim().length < 1) return drawRecents();
     box.innerHTML = loading('Aranıyor…');
     try {
-      const r = await api.search(q);
+      const r = await api.search(q, { near: getUserPos() || getMap().getCenter(), fresh: !!fresh });
+      // Places still loading on the server: ask again in a moment (a few times).
+      if (r.placesPending && fresh < 3) pendingRetry = setTimeout(() => input.value === q && run(q, fresh + 1), 1300);
       if (!isCurrent(token) || input.value !== q) return;
       const sections = [];
       if (!saveLabel && r.lines.length) {
@@ -235,7 +239,10 @@ export function viewSearch(token, query) {
   const deb = debounce(run, 280);
   const onInput = () => deb(input.value);
   input.addEventListener('input', onInput);
-  onLeave(() => input.removeEventListener('input', onInput));
+  onLeave(() => {
+    input.removeEventListener('input', onInput);
+    clearTimeout(pendingRetry);
+  });
   if (q0) run(q0);
   else drawRecents();
 }

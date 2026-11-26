@@ -57,7 +57,9 @@ const num = (v) => {
 const routes = [
   ['/api/status', async () => ({ ok: true, index: stopsIndex.status(), time: Date.now() })],
   [/^\/api\/search$/, async (m, q) => {
-    const r = await I.search(q.get('q') || '');
+    const lat = num(q.get('lat'));
+    const lng = num(q.get('lng'));
+    const r = await I.search(q.get('q') || '', { near: lat != null && lng != null ? { lat, lng } : null });
     if (!r.stops.length && r.error) r.stops = stopsIndex.searchStops(q.get('q') || '');
     // Enrich stops with coordinates from the local index when available.
     r.stops = r.stops.map((s) => {
