@@ -41,7 +41,10 @@ async function send(method, path, body) {
 const enc = encodeURIComponent;
 
 export const api = {
-  search: (q, o) => get(`/api/search?q=${enc(q)}`, { ttl: 60000, ...o }),
+  search: (q, o = {}) => {
+    const near = o.near ? `&lat=${o.near.lat.toFixed(3)}&lng=${o.near.lng.toFixed(3)}` : '';
+    return get(`/api/search?q=${enc(q)}${near}`, { ttl: o.fresh ? 0 : 60000, signal: o.signal });
+  },
   lines: () => get('/api/lines', { ttl: 3600000 }),
   line: (code) => get(`/api/line/${enc(code)}`, { ttl: 300000 }),
   schedule: (code) => get(`/api/line/${enc(code)}/schedule`, { ttl: 600000 }),
